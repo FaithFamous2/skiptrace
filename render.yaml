@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: skiptrace-platform
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ZENROWS_API_KEY
+        sync: false
