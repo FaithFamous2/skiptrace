@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkipTrace Platform</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .hero-section {
+            background: linear-gradient(135deg, #0062e6 0%, #33aeff 100%);
+            color: white;
+            padding: 3rem 0;
+            margin-bottom: 2rem;
+        }
+        .upload-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            background: white;
+        }
+        .instructions {
+            background-color: #f8f9fa;
+            border-left: 4px solid #0062e6;
+            padding: 1rem;
+            margin-bottom: 2rem;
+        }
+        .btn-primary {
+            background-color: #0062e6;
+            border-color: #0062e6;
+        }
+        .cost-estimator {
+            background-color: #e8f4ff;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-top: 2rem;
+        }
+        .progress-container {
+            margin-top: 2rem;
+            display: none;
+        }
+        #resultsTable {
+            margin-top: 2rem;
+            display: none;
+        }
+        #cancelBtn {
+            margin-top: 1rem;
+            display: none;
+        }
+        #downloadBtn {
+            margin-top: 1rem;
+        }
+        .status-messages {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .status-message {
+            padding: 0.5rem;
+            border-bottom: 1px solid #ddd;
+        }
+        .stats-container {
+            background-color: #f0f8ff;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-top: 1rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .stat-item {
+            text-align: center;
+            padding: 0.5rem;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #0062e6;
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .url-link {
+            font-size: 0.8rem;
+            color: #0066cc;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero-section">
+        <div class="container text-center">
+            <h1 class="display-4">Property Owner SkipTrace Platform</h1>
+            <p class="lead">Find property owner information using TruePeopleSearch data</p>
+            <a href="/downloads" class="btn btn-light mt-3">View Past Jobs</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="instructions">
+            <h4>Instructions</h4>
+            <ol>
+                <li>Upload a CSV file with property addresses</li>
+                <li>The system will automatically expand addresses with ranges (e.g., 253-5 N OGDEN AVE)</li>
+                <li>We'll search TruePeopleSearch for each address variant</li>
+                <li>Download results with owner names, phone numbers, and email addresses</li>
+            </ol>
+        </div>
+
+        <div class="upload-container">
+            <h3 class="text-center mb-4">Upload Your CSV File</h3>
+
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label for="csvFile" class="form-label">Select CSV File</label>
+                    <input class="form-control" type="file" id="csvFile" name="file" accept=".csv" required>
+                    <div class="form-text">CSV should include columns: Address, City, State, Zip, County</div>
+                </div>
+
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg">Process SkipTrace</button>
+                </div>
+            </form>
+
+            <div class="progress-container" id="progressContainer">
+                <h4 class="text-center">Processing...</h4>
+                <div class="progress mb-3">
+                    <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <p id="progressText" class="text-center">Starting...</p>
+
+                <div class="stats-container" id="statsContainer">
+                    <h5>Current Statistics</h5>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="statAddresses">0</div>
+                            <div class="stat-label">Addresses Processed</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statPeople">0</div>
+                            <div class="stat-label">People Found</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statPhones">0</div>
+                            <div class="stat-label">Phone Numbers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statEmails">0</div>
+                            <div class="stat-label">Email Addresses</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-messages" id="statusMessages">
+                    <!-- Status messages will be added here -->
+                </div>
+
+                <button id="cancelBtn" class="btn btn-danger">Cancel Processing</button>
+            </div>
+
+            <div id="errorAlert" class="alert alert-danger mt-3" style="display: none;"></div>
+            <div id="successAlert" class="alert alert-success mt-3" style="display: none;"></div>
+
+            <div class="cost-estimator">
+                <h5>Cost Estimation</h5>
+                <p>Using Zenrows API for scraping:</p>
+                <ul>
+                    <li>Each address search uses 1 API credit</li>
+                    <li>Each person detail page uses 1 API credit</li>
+                    <li>Estimated cost: <span id="costEstimate">0</span> credits for this search</li>
+                </ul>
+            </div>
+        </div>
+
+        <div id="resultsTable" class="mt-4">
+            <h3>Real-Time Results</h3>
+            <button id="exportBtn" class="btn btn-secondary mb-2">Export Table to CSV</button>
+            <table class="table table-striped table-bordered">
+                <thead>
+                    <tr>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Phone Number(s)</th>
+                        <th>Email Address</th>
+                        <th>Mailing Address</th>
+                        <th>URL</th>
+                    </tr>
+                </thead>
+                <tbody id="realTimeResultsBody">
+                    <!-- Real-time results will be appended here -->
+                </tbody>
+            </table>
+            <button id="downloadBtn" class="btn btn-success">Download Full Results File</button>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let jobId = null;
+        let stats = {
+            addresses_processed: 0,
+            people_found: 0,
+            phones_found: 0,
+            emails_found: 0,
+            addresses_found: 0
+        };
+
+        // UI Elements
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const errorElement = document.getElementById('errorAlert');
+        const successElement = document.getElementById('successAlert');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const resultsTable = document.getElementById('resultsTable');
+        const realTimeResultsBody = document.getElementById('realTimeResultsBody');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const statusMessages = document.getElementById('statusMessages');
+        const exportBtn = document.getElementById('exportBtn');
+
+        function resetUI() {
+            progressContainer.style.display = 'none';
+            errorElement.style.display = 'none';
+            successElement.style.display = 'none';
+            cancelBtn.style.display = 'none';
+            resultsTable.style.display = 'none';
+            downloadBtn.style.display = 'none';
+            exportBtn.style.display = 'none';
+            realTimeResultsBody.innerHTML = '';
+            statusMessages.innerHTML = '';
+            progressBar.style.width = '0%';
+            progressBar.setAttribute('aria-valuenow', 0);
+            progressText.textContent = 'Starting...';
+        }
+
+        function updateStatsDisplay() {
+            document.getElementById('statAddresses').textContent = stats.addresses_processed;
+            document.getElementById('statPeople').textContent = stats.people_found;
+            document.getElementById('statPhones').textContent = stats.phones_found;
+            document.getElementById('statEmails').textContent = stats.emails_found;
+            const totalCredits = stats.addresses_processed + stats.people_found;
+            document.getElementById('costEstimate').textContent = totalCredits;
+        }
+
+        function listenToJobStream(currentJobId) {
+            jobId = currentJobId;
+            eventSource = new EventSource(`/stream/${jobId}`);
+
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'progress') {
+                    const progress = (data.current / data.total) * 100;
+                    progressBar.style.width = `${progress}%`;
+                    progressBar.setAttribute('aria-valuenow', progress);
+                    progressText.textContent = `Processing ${data.current} of ${data.total}: ${data.address}`;
+                    if (data.stats) {
+                        stats = data.stats;
+                        updateStatsDisplay();
+                    }
+                } else if (data.type === 'status') {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'status-message';
+                    messageDiv.innerHTML = data.message + (data.url ? `<br><small class="url-link"><a href="${data.url}" target="_blank">${data.url}</a></small>` : '');
+                    statusMessages.appendChild(messageDiv);
+                    statusMessages.scrollTop = statusMessages.scrollHeight;
+                } else if (data.type === 'details') {
+                    const newRow = realTimeResultsBody.insertRow();
+                    newRow.innerHTML = `
+                        <td>${data.data.first_name || ''}</td>
+                        <td>${data.data.last_name || ''}</td>
+                        <td>${(data.data.phones || []).join(', ')}</td>
+                        <td>${(data.data.emails || []).join(', ')}</td>
+                        <td>${(data.data.addresses || []).join('; ')}</td>
+                        <td><a href="${data.data.url}" target="_blank" class="url-link">View Profile</a></td>
+                    `;
+                } else if (data.type === 'complete' || data.type === 'cancelled') {
+                    eventSource.close();
+                    progressText.textContent = data.message;
+                    cancelBtn.style.display = 'none';
+                    successElement.innerHTML = `<strong>${data.message}</strong>`;
+                    successElement.style.display = 'block';
+                } else if (data.type === 'error') {
+                    eventSource.close();
+                    errorElement.textContent = data.message;
+                    errorElement.style.display = 'block';
+                    cancelBtn.style.display = 'none';
+                }
+            };
+
+            eventSource.onerror = function() {
+                errorElement.textContent = 'An error occurred with the connection.';
+                errorElement.style.display = 'block';
+                if (eventSource) eventSource.close();
+                cancelBtn.style.display = 'none';
+            };
+        }
+
+        async function checkJobStatus(jobIdToCheck) {
+            try {
+                const response = await fetch(`/status/${jobIdToCheck}`);
+                if (!response.ok) {
+                    localStorage.removeItem('jobId');
+                    return;
+                }
+                const status = await response.json();
+
+                // Restore UI state
+                progressContainer.style.display = 'block';
+                resultsTable.style.display = 'block';
+                downloadBtn.style.display = 'block';
+                exportBtn.style.display = 'block';
+
+                stats = status.stats;
+                updateStatsDisplay();
+
+                const progress = status.total_rows > 0 ? (status.current_row / status.total_rows) * 100 : 0;
+                progressBar.style.width = `${progress}%`;
+                progressBar.setAttribute('aria-valuenow', progress);
+                progressText.textContent = `Processing ${status.current_row} of ${status.total_rows}`;
+
+                if (status.active && !status.cancelled) {
+                    cancelBtn.style.display = 'block';
+                    listenToJobStream(jobIdToCheck);
+                } else {
+                    cancelBtn.style.display = 'none';
+                    if (status.cancelled) {
+                        progressText.textContent = 'Processing was cancelled.';
+                    } else {
+                        progressText.textContent = 'Processing complete.';
+                        successElement.innerHTML = `<strong>Processing completed successfully</strong>`;
+                        successElement.style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error("Error checking job status:", error);
+                localStorage.removeItem('jobId');
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData();
+            formData.append('file', document.getElementById('csvFile').files[0]);
+
+            resetUI();
+            progressContainer.style.display = 'block';
+            cancelBtn.style.display = 'block';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to start processing');
+                }
+
+                const data = await response.json();
+                jobId = data.job_id;
+                localStorage.setItem('jobId', jobId);
+
+                // Show download and export buttons immediately
+                downloadBtn.style.display = 'block';
+                exportBtn.style.display = 'block';
+                resultsTable.style.display = 'block';
+
+                listenToJobStream(jobId);
+
+            } catch (error) {
+                errorElement.textContent = 'Error: ' + error.message;
+                errorElement.style.display = 'block';
+                progressContainer.style.display = 'none';
+            }
+        });
+
+        document.getElementById('cancelBtn').addEventListener('click', function() {
+            if (jobId) {
+                fetch('/cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: jobId })
+                });
+            }
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            const currentJobId = jobId || localStorage.getItem('jobId');
+            if (currentJobId) {
+                window.location.href = `/download/${currentJobId}`;
+            }
+        });
+
+        document.getElementById('exportBtn').addEventListener('click', function() {
+            const table = document.querySelector("#resultsTable table");
+            let csv = [];
+            const rows = table.querySelectorAll("tr");
+
+            for (const row of rows) {
+                const rowData = [];
+                for (const cell of row.querySelectorAll("th, td")) {
+                    rowData.push(`"${cell.textContent.replace(/"/g, '""')}"`);
+                }
+                csv.push(rowData.join(','));
+            }
+
+            const csvContent = "data:text/csv;charset=utf-8," + csv.join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "real_time_results.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // On page load, check for an existing job
+        window.onload = function() {
+            const existingJobId = localStorage.getItem('jobId');
+            if (existingJobId) {
+                checkJobStatus(existingJobId);
+            }
+        };
+    </script>
+</body>
+</html>

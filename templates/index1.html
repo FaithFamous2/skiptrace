@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkipTrace Platform</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .upload-container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-top: 30px;
+        }
+        .progress {
+            height: 25px;
+            margin: 20px 0;
+        }
+        .results-table {
+            margin-top: 30px;
+        }
+        .status-badge {
+            font-size: 0.9rem;
+            padding: 5px 10px;
+            border-radius: 20px;
+        }
+        #drop-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            background-color: #f8f9fa;
+            transition: all 0.3s;
+        }
+        #drop-area.highlight {
+            border-color: #0d6efd;
+            background-color: #e8f4ff;
+        }
+        .person-card {
+            border-left: 4px solid #0d6efd;
+            margin-bottom: 15px;
+        }
+        .detail-row {
+            margin-bottom: 5px;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .real-time-results {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            background-color: #f8f9fa;
+        }
+        .result-item {
+            padding: 10px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .result-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-search me-2"></i>SkipTrace Platform
+            </a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="upload-container">
+            <h2 class="mb-4"><i class="fas fa-file-upload me-2"></i>Upload Property CSV</h2>
+
+            <div id="drop-area">
+                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                <h5>Drag & Drop your CSV file here</h5>
+                <p class="text-muted">or</p>
+                <input type="file" id="fileInput" accept=".csv" class="d-none">
+                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                    Select CSV File
+                </button>
+            </div>
+
+            <div id="fileInfo" class="mt-3 d-none">
+                <h5>Selected file: <span id="fileName"></span></h5>
+                <button id="processBtn" class="btn btn-success mt-2">
+                    <i class="fas fa-play-circle me-2"></i>Start Processing
+                </button>
+            </div>
+
+            <div id="progressSection" class="mt-4 d-none">
+                <h4>Processing Status</h4>
+                <div class="d-flex justify-content-between mb-2">
+                    <span id="statusText">Initializing...</span>
+                    <span id="progressText">0/0</span>
+                </div>
+                <div class="progress">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                         role="progressbar" style="width: 0%"></div>
+                </div>
+
+                <div class="mt-4">
+                    <h5>Real-time Results</h5>
+                    <div id="realTimeResults" class="real-time-results">
+                        <div class="text-center text-muted">No results yet...</div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <button id="viewResultsBtn" class="btn btn-info me-2 d-none">
+                        <i class="fas fa-table me-2"></i>View All Results
+                    </button>
+                    <button id="downloadBtn" class="btn btn-success d-none">
+                        <i class="fas fa-download me-2"></i>Download CSV
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="results-table d-none">
+            <h3 class="my-4">All Results</h3>
+            <div id="resultsContainer">
+                <!-- Results will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentJobId = null;
+        let socket = null;
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const processBtn = document.getElementById('processBtn');
+        const progressSection = document.getElementById('progressSection');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const statusText = document.getElementById('statusText');
+        const viewResultsBtn = document.getElementById('viewResultsBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const realTimeResults = document.getElementById('realTimeResults');
+
+        // Drag and drop handling
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropArea.classList.remove('highlight');
+        }
+
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        fileInput.addEventListener('change', function() {
+            handleFiles(this.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+                    fileName.textContent = file.name;
+                    fileInfo.classList.remove('d-none');
+
+                    processBtn.onclick = function() {
+                        uploadFile(file);
+                    };
+                } else {
+                    alert('Please upload a CSV file');
+                }
+            }
+        }
+
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    currentJobId = data.job_id;
+                    fileInfo.classList.add('d-none');
+                    progressSection.classList.remove('d-none');
+
+                    // Initialize Socket.IO connection
+                    initializeSocketIO();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Upload failed');
+            });
+        }
+
+        function initializeSocketIO() {
+            // Connect to Socket.IO server
+            socket = io();
+            // Handle connection errors
+            socket.on('connect_error', function(error) {
+                console.error('Connection error:', error);
+                statusText.textContent = 'Connection error. Please refresh the page.';
+            });
+
+            // Handle disconnect
+            socket.on('disconnect', function(reason) {
+                console.log('Disconnected:', reason);
+                if (reason === 'io server disconnect') {
+                    // The server has forcefully disconnected the socket
+                    socket.connect();
+                }
+            });
+
+            // Join the job room
+            socket.emit('join_job', { job_id: currentJobId });
+
+            // Listen for job started event
+            socket.on('job_started', function(data) {
+                progressText.textContent = `0/${data.total_addresses}`;
+                statusText.textContent = 'Job started...';
+            });
+
+            // Listen for progress updates
+            socket.on('progress_update', function(data) {
+                if (data.job_id === currentJobId) {
+                    statusText.textContent = data.message;
+                    progressBar.style.width = `${data.progress}%`;
+                }
+            });
+
+            // Listen for person data
+            socket.on('person_data', function(data) {
+                if (data.job_id === currentJobId) {
+                    // Update progress text
+                    const total = scraping_jobs[currentJobId]?.total || 1;
+                    progressText.textContent = `${scraping_jobs[currentJobId]?.processed || 0}/${total}`;
+
+                    // Add to real-time results
+                    addRealTimeResult(data.person, data.current_index, data.total_persons);
+                }
+            });
+
+            // Listen for job completion
+            socket.on('job_completed', function(data) {
+                if (data.job_id === currentJobId) {
+                    statusText.textContent = `Completed! Found ${data.total_results} people`;
+                    progressBar.style.width = '100%';
+                    progressBar.classList.remove('progress-bar-animated');
+
+                    viewResultsBtn.classList.remove('d-none');
+                    downloadBtn.classList.remove('d-none');
+
+                    viewResultsBtn.onclick = function() {
+                        loadResults();
+                        resultsSection.classList.remove('d-none');
+                    };
+
+                    downloadBtn.onclick = function() {
+                        window.location.href = `/download/${currentJobId}`;
+                    };
+                }
+            });
+
+            // Listen for errors
+            socket.on('error', function(data) {
+                if (data.job_id === currentJobId) {
+                    statusText.textContent = `Error: ${data.message}`;
+                    progressBar.classList.remove('progress-bar-animated');
+                    progressBar.classList.add('bg-danger');
+                }
+            });
+        }
+
+        function addRealTimeResult(person, currentIndex, totalPersons) {
+            // Clear "no results" message if it exists
+            if (realTimeResults.querySelector('.text-center')) {
+                realTimeResults.innerHTML = '';
+            }
+
+            const resultItem = document.createElement('div');
+            resultItem.className = 'result-item bg-white rounded p-3 mb-2 shadow-sm';
+
+            resultItem.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">${person.first_name} ${person.last_name}</h6>
+                    <span class="badge bg-primary">${currentIndex}/${totalPersons}</span>
+                </div>
+                <div class="mt-2">
+                    <small class="text-muted">${person.search_address}</small>
+                </div>
+                <div class="mt-1">
+                    <span class="badge bg-info">Age: ${person.age}</span>
+                    ${person.phone_numbers.length > 0 ? `<span class="badge bg-success ms-1">${person.phone_numbers.length} phones</span>` : ''}
+                    ${person.email_addresses.length > 0 ? `<span class="badge bg-warning ms-1">${person.email_addresses.length} emails</span>` : ''}
+                </div>
+            `;
+
+            realTimeResults.prepend(resultItem);
+
+            // Limit to 10 results in real-time view
+            if (realTimeResults.children.length > 10) {
+                realTimeResults.removeChild(realTimeResults.lastChild);
+            }
+
+            // Auto-scroll to top
+            realTimeResults.scrollTop = 0;
+        }
+
+        function loadResults() {
+            fetch(`/results/${currentJobId}`)
+                .then(response => response.json())
+                .then(data => {
+                    resultsContainer.innerHTML = '';
+
+                    if (data.length === 0) {
+                        resultsContainer.innerHTML = '<div class="alert alert-info text-center">No results found</div>';
+                        return;
+                    }
+
+                    data.forEach(person => {
+                        const personCard = document.createElement('div');
+                        personCard.className = 'card person-card mb-3';
+
+                        personCard.innerHTML = `
+                            <div class="card-body">
+                                <h5 class="card-title">${person.first_name} ${person.last_name} ${person.age !== 'N/A' ? `, Age ${person.age}` : ''}</h5>
+                                <div class="text-muted mb-2">Searched at: ${person.search_address}</div>
+
+                                ${person.mailing_address !== 'N/A' ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Address:</span> ${person.mailing_address}
+                                </div>` : ''}
+
+                                ${person.phone_numbers.length > 0 ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Phone:</span> ${person.phone_numbers.join(', ')}
+                                </div>` : ''}
+
+                                ${person.email_addresses.length > 0 ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Email:</span> ${person.email_addresses.join(', ')}
+                                </div>` : ''}
+
+                                ${person.associated_names.length > 0 ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Also known as:</span> ${person.associated_names.join(', ')}
+                                </div>` : ''}
+
+                                ${person.relatives.length > 0 ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Relatives:</span> ${person.relatives.join(', ')}
+                                </div>` : ''}
+
+                                ${person.address_history.length > 0 ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Previous addresses:</span> ${person.address_history.join(', ')}
+                                </div>` : ''}
+                            </div>
+                        `;
+
+                        resultsContainer.appendChild(personCard);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading results:', error);
+                });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Owner SkipTrace Platform</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        .hero {
+            background: linear-gradient(135deg, #0062cc 0%, #0095ff 100%);
+            color: white;
+            padding: 3rem 0;
+            margin-bottom: 2rem;
+        }
+        .upload-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .feature-icon {
+            font-size: 2rem;
+            color: #0062cc;
+            margin-bottom: 1rem;
+        }
+        .feature-card {
+            transition: transform 0.3s;
+            height: 100%;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+        #results-container {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <div class="container text-center">
+            <h1 class="display-4 fw-bold">Property Owner SkipTrace Platform</h1>
+            <p class="lead">Enrich property data with comprehensive owner information</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-10 upload-container">
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0"><i class="bi bi-cloud-upload me-2"></i>Upload CSV File</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="upload-form" method="POST" action="/upload" enctype="multipart/form-data">
+                            <input type="hidden" id="sid" name="sid">
+                            <div class="mb-3">
+                                <label for="file" class="form-label">Select CSV file containing property addresses</label>
+                                <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
+                                <div class="form-text">Your CSV should include: Address, City, State, Zip columns</div>
+                            </div>
+                            <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+                                <i class="bi bi-hourglass-split me-1"></i> Connecting...
+                            </button>
+                            <a href="/sample_csv" class="btn btn-outline-secondary ms-2">
+                                <i class="bi bi-download me-1"></i> Download Sample CSV
+                            </a>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div id="progress-container" class="progress-container">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title">Processing Status</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress mb-3">
+                                <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                            </div>
+                            <div id="progress-text">Waiting to start...</div>
+                            <div id="current-address" class="mt-2 small text-muted"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Container -->
+                <div id="results-container" class="mt-4">
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="card-title mb-0">Processing Complete</h5>
+                        </div>
+                        <div class="card-body text-center">
+                            <div class="mb-3">
+                                <i class="bi bi-check-circle-fill text-success" style="font-size: 3rem;"></i>
+                            </div>
+                            <p>Your file has been processed successfully with enhanced owner information.</p>
+                            <a id="download-link" href="#" class="btn btn-primary">
+                                <i class="bi bi-download me-1"></i> Download Results
+                            </a>
+                            <a href="/" class="btn btn-outline-secondary ms-2">
+                                <i class="bi bi-house me-1"></i> Process Another File
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Container -->
+                <div id="error-container" class="alert alert-danger mt-4" style="display: none;">
+                    <h5>Error</h5>
+                    <div id="error-message"></div>
+                </div>
+
+                <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
+                    <a href="/api_info" class="btn btn-outline-primary me-md-2">
+                        <i class="bi bi-info-circle me-1"></i> API Information
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-light text-center text-muted py-4 mt-5">
+        <div class="container">
+            <p class="mb-0">SkipTrace Platform &copy; 2023 | Using ATTOM API for property data</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Connect to SocketIO
+        const socket = io();
+        const submitBtn = document.getElementById('submit-btn');
+
+        socket.on('session_id', function(data) {
+            console.log('Received session ID:', data.sid);
+            document.getElementById('sid').value = data.sid;
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-gear me-1"></i> Process File';
+        });
+
+        // Handle form submission
+        document.getElementById('upload-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const progressContainer = document.getElementById('progress-container');
+            const resultsContainer = document.getElementById('results-container');
+            const errorContainer = document.getElementById('error-container');
+
+            // Reset UI
+            progressContainer.style.display = 'block';
+            resultsContainer.style.display = 'none';
+            errorContainer.style.display = 'none';
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'processing') {
+                    // Successfully started processing
+                    console.log('Processing started with session ID:', data.session_id);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('error-message').textContent = 'Error uploading file: ' + error;
+                errorContainer.style.display = 'block';
+            });
+        });
+
+        // SocketIO event handlers
+        socket.on('progress', function(data) {
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const currentAddress = document.getElementById('current-address');
+
+            progressBar.style.width = data.percent + '%';
+            progressBar.textContent = data.percent + '%';
+            progressBar.setAttribute('aria-valuenow', data.percent);
+
+            progressText.textContent = `Processed ${data.current} of ${data.total} properties`;
+
+            if (data.address) {
+                currentAddress.textContent = `Current: ${data.address}`;
+            }
+        });
+
+        socket.on('complete', function(data) {
+            const progressContainer = document.getElementById('progress-container');
+            const resultsContainer = document.getElementById('results-container');
+            const downloadLink = document.getElementById('download-link');
+
+            progressContainer.style.display = 'none';
+            resultsContainer.style.display = 'block';
+            downloadLink.href = '/download/' + data.filename;
+        });
+
+        socket.on('error', function(data) {
+            const errorContainer = document.getElementById('error-container');
+            const errorMessage = document.getElementById('error-message');
+
+            errorMessage.textContent = data.message;
+            errorContainer.style.display = 'block';
+        });
+
+        socket.on('status_update', function(data) {
+            console.log('Status:', data.message);
+        });
+    </script>
+</body>
+</html>

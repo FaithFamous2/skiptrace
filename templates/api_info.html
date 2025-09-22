@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Information</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="/">SkipTrace Platform</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/api_info">API Information</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h1>API Integration Information</h1>
+        <p class="lead">Understanding the data sources and capabilities of our skip tracing services</p>
+
+        <div class="row mt-4">
+            {% for api, info in api_info.items() %}
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5>{{ api }} API</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Coverage</h6>
+                        <p class="card-text">{{ info.coverage }}</p>
+
+                        <h6 class="card-subtitle mb-2 text-muted">Data Provided</h6>
+                        <p class="card-text">{{ info.data_provided }}</p>
+
+                        <h6 class="card-subtitle mb-2 text-muted">Limitations</h6>
+                        <p class="card-text">{{ info.limitations }}</p>
+
+                        <h6 class="card-subtitle mb-2 text-muted">Cost</h6>
+                        <p class="card-text">{{ info.cost }}</p>
+
+                        <a href="{{ info.link }}" target="_blank" class="btn btn-sm btn-outline-primary mt-2">
+                            <i class="bi bi-box-arrow-up-right me-1"></i> Learn More
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="alert alert-info mt-4">
+            <h5>Implementation Notes</h5>
+            <p>This platform primarily uses the ATTOM API for property and owner information. For contact details like phone numbers and email addresses, you'll need to:</p>
+            <ol>
+                <li>Integrate with a contact information provider like Melissa</li>
+                <li>Implement the API calls in the <code>get_contact_info_from_melissa()</code> function</li>
+                <li>Handle authentication and billing with the service provider</li>
+            </ol>
+        </div>
+
+        <a href="/" class="btn btn-primary mt-3">
+            <i class="bi bi-arrow-left me-1"></i> Back to Home
+        </a>
+    </div>
+
+    <footer class="bg-light text-center text-muted py-4 mt-5">
+        <div class="container">
+            <p class="mb-0">SkipTrace Platform &copy; 2023 | Using ATTOM API for property data</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

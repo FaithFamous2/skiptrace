@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ATTOM Skiptrace - Upload CSV</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    body { max-width: 900px; margin: 28px auto; padding: 0 18px; color: #222; }
+    h1 { font-size: 20px; margin-bottom: 6px; }
+    p.lead { margin-top:0; color:#555; margin-bottom:18px; }
+    form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    input[type=file] { padding:6px; }
+    button { padding:8px 12px; border-radius:8px; border:1px solid #1f6feb; background:#1f6feb; color:white; cursor:pointer; }
+    button:disabled { opacity:0.6; cursor:not-allowed; }
+    .progress { height:18px; background:#eee; border-radius:9px; overflow:hidden; margin-top:12px; }
+    .bar { height:100%; width:0%; background:linear-gradient(90deg,#4aa3ff,#2b6cff); transition: width 200ms ease; }
+    #status { margin-top:10px; font-weight:600; color:#333; }
+    #log { margin-top:12px; white-space:pre-wrap; height:320px; overflow:auto; background:#f7f9fc; padding:12px; border-radius:8px; border:1px solid #e3e9f5; font-family: monospace; font-size:13px; }
+    a.download { display:inline-block; margin-top:12px; padding:8px 10px; background:#0b9d58; color:#fff; text-decoration:none; border-radius:8px; }
+    .small { font-size:13px; color:#666; }
+    footer { margin-top:18px; color:#777; font-size:13px; }
+  </style>
+
+  <!-- Socket.IO client (v4) -->
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>ATTOM Skiptrace — CSV Upload</h1>
+  <p class="lead">Upload your tab- or comma-delimited CSV with the header you shared. The server will call ATTOM for each address and stream progress back to this page.</p>
+
+  <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" id="csv_file" name="csv_file" accept=".csv,.txt" required />
+    <input type="hidden" id="sid" name="sid" value="" />
+    <button id="btnUpload" type="submit">Upload & Process</button>
+    <button id="btnCancel" type="button" style="background:#ddd;color:#222;border:1px solid #ccc;">Reset</button>
+  </form>
+
+  <div class="progress" aria-hidden="true"><div id="bar" class="bar"></div></div>
+  <div id="status">Status: idle</div>
+
+  <div id="log" aria-live="polite"></div>
+
+  <div id="downloadArea"></div>
+
+  <footer>
+    <div class="small">Notes: Make sure the Flask app is running and your ATTOM_API_KEY is set in the environment. If ATTOM does not return phone/email, you will need a people-enrichment provider (PDL / Enformion) to populate those fields.</div>
+  </footer>
+
+  <script>
+    const socket = io();
+
+    const sidInput = document.getElementById("sid");
+    const form = document.getElementById("uploadForm");
+    const fileInput = document.getElementById("csv_file");
+    const btnUpload = document.getElementById("btnUpload");
+    const btnCancel = document.getElementById("btnCancel");
+    const bar = document.getElementById("bar");
+    const status = document.getElementById("status");
+    const logEl = document.getElementById("log");
+    const downloadArea = document.getElementById("downloadArea");
+
+    let total = 0;
+    let processed = 0;
+
+    function log(msg, kind="info") {
+      const ts = new Date().toLocaleTimeString();
+      const line = `[${ts}] ${msg}\n`;
+      logEl.textContent = line + logEl.textContent;
+    }
+
+    function setProgress(pct) {
+      bar.style.width = pct + "%";
+    }
+
+    socket.on("connect", () => {
+      sidInput.value = socket.id;
+      log("Socket connected. sid=" + socket.id);
+    });
+
+    socket.on("connected", (d) => {
+      sidInput.value = d.sid || socket.id;
+      log("Server acknowledged socket connection.");
+    });
+
+    socket.on("processing_started", (data) => {
+      total = data.total || 0;
+      processed = 0;
+      setProgress(0);
+      status.textContent = `Status: processing (0/${total})`;
+      log(`Processing started. ${total} rows to process.`);
+      btnUpload.disabled = true;
+    });
+
+    socket.on("row_processed", (d) => {
+      processed = d.index || processed + 1;
+      status.textContent = `Status: processing (${processed}/${total})`;
+      const owner = (d.row && (d.row["Owner First Name"] || d.row["Owner Last Name"])) ? `${d.row["Owner First Name"] || ""} ${d.row["Owner Last Name"] || ""}`.trim() : "(no owner)";
+      log(`Row ${d.index}/${d.total} => ${owner} phones:${d.row["Phone Numbers"] || ""}`);
+      const pct = total ? Math.round((processed / total) * 100) : 0;
+      setProgress(pct);
+    });
+
+    socket.on("row_error", (d) => {
+      log(`Error processing row ${d.index}: ${d.error}`, "error");
+    });
+
+    socket.on("processing_error", (d) => {
+      log(`Processing error: ${d.error}`, "error");
+      status.textContent = "Status: error";
+      btnUpload.disabled = false;
+    });
+
+    socket.on("processing_complete", (d) => {
+      processed = d.total || processed;
+      setProgress(100);
+      status.textContent = `Status: complete (${processed}/${d.total})`;
+      log("Processing complete. Download available: " + d.download_url);
+      downloadArea.innerHTML = `<a class="download" href="${d.download_url}">Download results CSV</a>`;
+      btnUpload.disabled = false;
+    });
+
+    // form submit
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      if (!sidInput.value) {
+        alert("Socket not connected yet. Wait a moment and retry.");
+        return;
+      }
+      if (!fileInput.files.length) {
+        alert("Choose a CSV file first.");
+        return;
+      }
+
+      // clear UI
+      logEl.textContent = "";
+      downloadArea.innerHTML = "";
+      setProgress(0);
+      status.textContent = "Status: uploading...";
+
+      const fd = new FormData();
+      fd.append("csv_file", fileInput.files[0]);
+      fd.append("sid", sidInput.value);
+
+      try {
+        const res = await fetch("/upload", { method: "POST", body: fd });
+        const j = await res.json();
+        if (!res.ok || j.status !== "ok") {
+          log("Upload error: " + (j.message || JSON.stringify(j)), "error");
+          status.textContent = "Status: upload error";
+          btnUpload.disabled = false;
+          return;
+        }
+        log("Upload accepted by server; processing will begin shortly.");
+        status.textContent = "Status: processing started";
+        btnUpload.disabled = true;
+      } catch (err) {
+        log("Upload failed: " + err, "error");
+        status.textContent = "Status: upload failed";
+        btnUpload.disabled = false;
+      }
+    });
+
+    btnCancel.addEventListener("click", () => {
+      fileInput.value = "";
+      sidInput.value = socket.id;
+      logEl.textContent = "";
+      setProgress(0);
+      status.textContent = "Status: idle";
+      downloadArea.innerHTML = "";
+      btnUpload.disabled = false;
+    });
+
+    // handle disconnects
+    socket.on("disconnect", () => {
+      log("Socket disconnected.");
+      status.textContent = "Status: disconnected";
+      btnUpload.disabled = true;
+    });
+  </script>
+</body>
+</html>
