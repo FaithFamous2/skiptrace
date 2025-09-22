@@ -8,10 +8,14 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import io
 import logging
+from datetime import datetime
 import json
 from typing import List, Dict, Any, Optional, Tuple
 import threading
 import random
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +25,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Configuration
-ZENROWS_API_KEY = "31c5dad0d91029b9f4676c42981fc706cebf20ac"
+ZENROWS_API_KEY = os.getenv("ZENROWS_API_KEY")
 ZENROWS_BASE_URL = "https://api.zenrows.com/v1/"
 TRUE_PEOPLE_SEARCH_BASE = "https://www.truepeoplesearch.com"
 
@@ -744,6 +748,12 @@ def get_status(job_id):
         })
     return jsonify({'error': 'Invalid job ID'}), 404
 
+@app.template_filter('datetimeformat')
+def datetimeformat(value, format='%Y-%m-%d %H:%M:%S'):
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value).strftime(format)
+    return value
+
 @app.route('/downloads')
 def list_downloads():
     files = []
@@ -762,6 +772,27 @@ def list_downloads():
 
     return render_template('download_jobs.html', files=files)
 
+@app.route('/preview/<job_id>')
+def preview_job(job_id):
+    filename = f"{job_id}_results.csv"
+    filepath = os.path.join(RESULTS_FOLDER, filename)
+
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            rows = list(reader)
+
+        return jsonify({
+            'headers': headers,
+            'rows': rows
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/view/<job_id>')
 def view_job(job_id):
     filename = f"{job_id}_results.csv"
@@ -776,6 +807,16 @@ def view_job(job_id):
         rows = list(reader)
 
     return render_template('view_job.html', job_id=job_id, filename=filename, headers=headers, rows=rows)
+
+@app.route('/download/<job_id>')
+def download_job(job_id):
+    filename = f"{job_id}_results.csv"
+    filepath = os.path.join(RESULTS_FOLDER, filename)
+
+    if not os.path.exists(filepath):
+        return "File not found", 404
+
+    return send_file(filepath, as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':
     app.run(debug=True, threaded=True, port=5001)

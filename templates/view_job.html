@@ -3,64 +3,232 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Job: {{ job_id }}</title>
+    <title>Job Downloads</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         .hero-section {
             background: linear-gradient(135deg, #0062e6 0%, #33aeff 100%);
             color: white;
-            padding: 3rem 0;
+            padding: 2rem 0;
             margin-bottom: 2rem;
         }
-        .view-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
-            background: white;
+        .file-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
         }
-        .table-responsive {
-            margin-top: 2rem;
+        .file-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        .preview-section {
+            display: none;
+            margin-top: 1rem;
+            padding: 1rem;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+        }
+        .preview-table {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+        .btn-preview {
+            background-color: #17a2b8;
+            border-color: #17a2b8;
+            color: white;
+        }
+        .btn-preview:hover {
+            background-color: #138496;
+            border-color: #117a8b;
+        }
+        .active-preview {
+            border-color: #17a2b8;
+            box-shadow: 0 0 0 0.2rem rgba(23, 162, 184, 0.25);
+        }
+        .download-btn-container {
+            display: none;
+            margin-top: 1rem;
+            text-align: center;
         }
     </style>
 </head>
 <body>
     <div class="hero-section">
         <div class="container text-center">
-            <h1 class="display-4">Job Results: {{ job_id }}</h1>
-            <p class="lead">Viewing results for job: {{ filename }}</p>
+            <h1 class="display-4">Job Results</h1>
+            <p class="lead">View and download your job results</p>
         </div>
     </div>
 
     <div class="container">
-        <div class="view-container">
-            <div class="text-center mb-4">
-                <a href="/downloads" class="btn btn-secondary">Back to Downloads</a>
-                <a href="/download/{{ job_id }}" class="btn btn-success">Export to CSV</a>
-            </div>
+        <div class="row">
+            <div class="col-12">
+                <h2 class="mb-4">Available Downloads</h2>
 
-            <div class="table-responsive">
-                <table class="table table-striped table-bordered">
-                    <thead>
-                        <tr>
-                            {% for header in headers %}
-                                <th>{{ header }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in rows %}
-                            <tr>
-                                {% for cell in row %}
-                                    <td>{{ cell }}</td>
-                                {% endfor %}
-                            </tr>
+                {% if files %}
+                    <div class="row">
+                        {% for file in files %}
+                            <div class="col-md-6 col-lg-4">
+                                <div class="file-card" id="card-{{ file.job_id }}">
+                                    <h5>{{ file.name }}</h5>
+                                    <p class="text-muted">
+                                        Created: {{ file.creation_time|datetimeformat }}
+                                    </p>
+                                    <div class="d-flex justify-content-between">
+                                        <button class="btn btn-preview preview-toggle"
+                                                data-job-id="{{ file.job_id }}"
+                                                data-filename="{{ file.name }}">
+                                            Preview
+                                        </button>
+                                        <a href="/download/{{ file.job_id }}" class="btn btn-success download-btn">Download</a>
+                                    </div>
+
+                                    <!-- Preview Section -->
+                                    <div class="preview-section" id="preview-{{ file.job_id }}">
+                                        <div class="preview-content">
+                                            <!-- Preview content will be loaded here -->
+                                        </div>
+                                    </div>
+
+                                    <!-- Download Button (shown after preview) -->
+                                    <div class="download-btn-container" id="download-container-{{ file.job_id }}">
+                                        <a href="/download/{{ file.job_id }}" class="btn btn-success btn-lg">Download Full File</a>
+                                        <button class="btn btn-secondary collapse-preview" data-job-id="{{ file.job_id }}">Collapse Preview</button>
+                                    </div>
+                                </div>
+                            </div>
                         {% endfor %}
-                    </tbody>
-                </table>
+                    </div>
+                {% else %}
+                    <div class="alert alert-info text-center">
+                        No job results available for download.
+                    </div>
+                {% endif %}
             </div>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Toggle preview when clicking preview button
+        document.querySelectorAll('.preview-toggle').forEach(button => {
+            button.addEventListener('click', function() {
+                const jobId = this.getAttribute('data-job-id');
+                const filename = this.getAttribute('data-filename');
+                const previewSection = document.getElementById(`preview-${jobId}`);
+                const downloadContainer = document.getElementById(`download-container-${jobId}`);
+                const fileCard = document.getElementById(`card-${jobId}`);
+
+                // If preview is already shown, hide it
+                if (previewSection.style.display === 'block') {
+                    previewSection.style.display = 'none';
+                    downloadContainer.style.display = 'none';
+                    fileCard.classList.remove('active-preview');
+                    this.textContent = 'Preview';
+                } else {
+                    // Show preview section
+                    previewSection.style.display = 'block';
+                    fileCard.classList.add('active-preview');
+                    this.textContent = 'Hide Preview';
+
+                    // Show loading message
+                    previewSection.querySelector('.preview-content').innerHTML = `
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading preview...</p>
+                        </div>
+                    `;
+
+                    // Fetch the preview data
+                    fetch(`/preview/${jobId}`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Failed to load preview');
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            // Create the preview table
+                            let tableHtml = `
+                                <h6>Preview of ${filename}</h6>
+                                <div class="preview-table">
+                                    <table class="table table-sm table-striped table-bordered">
+                                        <thead>
+                                            <tr>
+                            `;
+
+                            // Add headers
+                            data.headers.forEach(header => {
+                                tableHtml += `<th>${header}</th>`;
+                            });
+
+                            tableHtml += `
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                            `;
+
+                            // Add rows (limit to first 10 for preview)
+                            data.rows.slice(0, 10).forEach(row => {
+                                tableHtml += `<tr>`;
+                                row.forEach(cell => {
+                                    tableHtml += `<td>${cell}</td>`;
+                                });
+                                tableHtml += `</tr>`;
+                            });
+
+                            tableHtml += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+
+                            // Add a note if there are more rows
+                            if (data.rows.length > 10) {
+                                tableHtml += `
+                                    <div class="alert alert-info">
+                                        Showing first 10 rows of ${data.rows.length} total rows.
+                                    </div>
+                                `;
+                            }
+
+                            previewSection.querySelector('.preview-content').innerHTML = tableHtml;
+
+                            // Show download button after preview is loaded
+                            downloadContainer.style.display = 'block';
+                        })
+                        .catch(error => {
+                            previewSection.querySelector('.preview-content').innerHTML = `
+                                <div class="alert alert-danger">
+                                    Error loading preview: ${error.message}
+                                </div>
+                            `;
+                        });
+                }
+            });
+        });
+
+        // Collapse preview when clicking collapse button
+        document.querySelectorAll('.collapse-preview').forEach(button => {
+            button.addEventListener('click', function() {
+                const jobId = this.getAttribute('data-job-id');
+                const previewSection = document.getElementById(`preview-${jobId}`);
+                const downloadContainer = document.getElementById(`download-container-${jobId}`);
+                const fileCard = document.getElementById(`card-${jobId}`);
+                const previewButton = fileCard.querySelector('.preview-toggle');
+
+                previewSection.style.display = 'none';
+                downloadContainer.style.display = 'none';
+                fileCard.classList.remove('active-preview');
+                previewButton.textContent = 'Preview';
+            });
+        });
+    </script>
 </body>
 </html>
