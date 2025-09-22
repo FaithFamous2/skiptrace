@@ -84,8 +84,15 @@ class SkipTracer:
 
     def make_zenrows_request(self, url: str, max_retries: int = 3) -> Optional[requests.Response]:
         """
-        Make a request to Zenrows with retry logic and proper parameters
+        Make a request to Zenrows with retry logic and defensive error handling.
+
+        Defensive improvements:
+        - Rate-limits to avoid 429s
+        - Exponential backoff with jitter on retry
+        - Catches RecursionError (observed in SSLContext recursion), SSLError, and RequestException
+        - Returns None on unrecoverable errors so callers can continue gracefully
         """
+        # Rate limiting to avoid 429 errors
         current_time = time.time()
         time_since_last_request = current_time - self.last_request_time
 
@@ -96,10 +103,12 @@ class SkipTracer:
         self.last_request_time = time.time()
 
         for attempt in range(max_retries):
+            response = None
             try:
+                # Add a small delay between retries (exponential backoff + jitter)
                 if attempt > 0:
-                    wait_time = 2 ** attempt + random.uniform(0, 1)
-                    logger.info(f"Waiting {wait_time:.2f} seconds before retry...")
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    logger.info(f"Waiting {wait_time:.2f} seconds before retry (attempt {attempt + 1})...")
                     time.sleep(wait_time)
 
                 params = {
@@ -108,33 +117,59 @@ class SkipTracer:
                     'js_render': 'true',
                     'premium_proxy': 'true',
                     'proxy_country': 'us',
-                    'wait': str(ZENROWS_WAIT_MS),  # configurable
+                    'wait': str(ZENROWS_WAIT_MS),  # configurable via env var
                     'block_resources': 'image,media,font',
                 }
 
-                response = self.session.get(
-                    ZENROWS_BASE_URL,
-                    params=params,
-                    timeout=30
-                )
+                # Perform the request; wrap in try/except to catch SSL/recursion issues
+                try:
+                    response = self.session.get(
+                        ZENROWS_BASE_URL,
+                        params=params,
+                        timeout=30  # request-level timeout (tune as needed)
+                    )
+                except RecursionError as rec_err:
+                    # Observed when SSLContext property recurses (often gevent/monkeypatch issue).
+                    logger.exception(
+                        "RecursionError while creating SSLContext (likely SSL/monkeypatch/compatibility issue). "
+                        "Switch to gthread or pin Python/OpenSSL if you see this repeatedly."
+                    )
+                    # Do not re-raise; return None so caller treats as failed fetch
+                    return None
+                except requests.exceptions.SSLError as ssle:
+                    logger.exception(f"SSL error while calling Zenrows: {ssle}")
+                    # treat as transient and let outer retry loop continue (response is None)
+                    response = None
+                except requests.exceptions.RequestException as req_e:
+                    logger.error(f"Attempt {attempt + 1}: Request error: {req_e}")
+                    response = None
 
-                if response.status_code == 200:
-                    self.request_count += 1
-                    return response
-                elif response.status_code == 429:
-                    logger.error(f"Attempt {attempt + 1}: Rate limited (429). Waiting longer...")
-                    time.sleep(10 * (attempt + 1))
-                    continue
-                else:
-                    logger.error(f"Attempt {attempt + 1}: Failed to fetch data: {response.status_code}")
-                    if response.text:
-                        logger.debug(f"Response content (truncated): {response.text[:500]}")
+                # If we got a response, handle status codes
+                if response is not None:
+                    if response.status_code == 200:
+                        self.request_count += 1
+                        return response
+                    elif response.status_code == 429:
+                        logger.error(f"Attempt {attempt + 1}: Rate limited (429). Waiting longer...")
+                        # Longer wait for rate limiting
+                        time.sleep(10 * (attempt + 1))
+                        continue
+                    else:
+                        logger.error(f"Attempt {attempt + 1}: Failed to fetch data: {response.status_code}")
+                        if response.text:
+                            logger.debug(f"Response content (truncated): {response.text[:500]}")
+                        # For non-429 HTTP errors we retry a limited number of times
+                        continue
 
-            except requests.exceptions.Timeout:
-                logger.error(f"Attempt {attempt + 1}: Timeout error")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Attempt {attempt + 1}: Request error: {str(e)}")
+            except Exception as e:
+                # Catch-all for anything unexpected during the attempt loop (keeps worker alive)
+                logger.exception(f"Unexpected error during Zenrows request attempt {attempt + 1}: {e}")
+                # small jitter before next retry
+                time.sleep(random.uniform(0.5, 1.5))
+                continue
 
+        # If all retries failed, return None
+        logger.error(f"All {max_retries} attempts to fetch {url} failed.")
         return None
 
     def search_address(self, address: str, city: str, state: str, zip_code: str) -> Optional[BeautifulSoup]:
