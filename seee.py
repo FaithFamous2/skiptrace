@@ -8,10 +8,14 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import io
 import logging
+from datetime import datetime
 import json
 from typing import List, Dict, Any, Optional, Tuple
 import threading
 import random
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +25,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Configuration
-ZENROWS_API_KEY = "31c5dad0d91029b9f4676c42981fc706cebf20ac"
+ZENROWS_API_KEY = os.getenv("ZENROWS_API_KEY")
 ZENROWS_BASE_URL = "https://api.zenrows.com/v1/"
 TRUE_PEOPLE_SEARCH_BASE = "https://www.truepeoplesearch.com"
 
@@ -277,11 +281,13 @@ class SkipTracer:
             'phones': [],
             'emails': [],
             'addresses': [],
+            'url': '',
             'error': None
         }
 
         try:
             full_url = f"{TRUE_PEOPLE_SEARCH_BASE}{detail_url}"
+            details['url'] = full_url
             logger.info(f"Getting details for: {full_url}")
 
             # Add real-time update
@@ -395,6 +401,24 @@ class SkipTracer:
                     if full_address and full_address not in details['addresses']:
                         details['addresses'].append(full_address)
 
+            # Also get addresses from bio
+            bio_address_links = person_card.select('a[data-link-to-more="bio-address"]')
+            processed_hrefs = set()
+            for link in bio_address_links:
+                href = link.get('href')
+                if href in processed_hrefs:
+                    continue
+
+                all_links_for_href = person_card.select(f'a[href="{href}"]')
+                full_address_parts = []
+                for part_link in all_links_for_href:
+                    full_address_parts.append(' '.join(part_link.stripped_strings))
+
+                processed_hrefs.add(href)
+                full_address = ' '.join(full_address_parts)
+                if full_address and full_address not in details['addresses']:
+                    details['addresses'].append(full_address)
+
 
             # --- End of New Logic ---
 
@@ -413,7 +437,8 @@ class SkipTracer:
                         'last_name': details['last_name'],
                         'phones': details['phones'],
                         'emails': details['emails'],
-                        'addresses': details['addresses']
+                        'addresses': details['addresses'],
+                        'url': details['url']
                     }
                 })
 
@@ -563,7 +588,7 @@ def upload_file():
             # Prepare CSV for writing
             fieldnames = list(rows[0].keys()) + [
                 "Owner's First Name", "Owner's Last Name", 'Phone Number(s)',
-                'Mailing Address', 'Email Address', 'full address'
+                'Mailing Address', 'Email Address', 'URL', 'full address'
             ]
             with open(job['output_filepath'], 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -607,6 +632,7 @@ def upload_file():
                                 result_row['Phone Number(s)'] = '; '.join(person.get('phones', []))
                                 result_row['Mailing Address'] = '; '.join(person.get('addresses', []))
                                 result_row['Email Address'] = '; '.join(person.get('emails', []))
+                                result_row['URL'] = person.get('url', '')
                                 result_row['full address'] = address
                                 writer.writerow(result_row)
                         else:
@@ -616,6 +642,7 @@ def upload_file():
                             result_row['Phone Number(s)'] = ''
                             result_row['Mailing Address'] = ''
                             result_row['Email Address'] = ''
+                            result_row['URL'] = ''
                             result_row['full address'] = address
                             writer.writerow(result_row)
                 else:
@@ -627,6 +654,7 @@ def upload_file():
                         result_row['Phone Number(s)'] = ''
                         result_row['Mailing Address'] = ''
                         result_row['Email Address'] = ''
+                        result_row['URL'] = ''
                         result_row['full address'] = ''
                         writer.writerow(result_row)
 
@@ -695,15 +723,16 @@ def cancel_processing():
 
 @app.route('/download/<job_id>')
 def download_file(job_id):
-    if job_id in processing_jobs:
-        job = processing_jobs[job_id]
-        if os.path.exists(job['output_filepath']):
-            return send_file(
-                job['output_filepath'],
-                mimetype='text/csv',
-                as_attachment=True,
-                download_name=job['output_filename']
-            )
+    filename = f"{job_id}_results.csv"
+    filepath = os.path.join(RESULTS_FOLDER, filename)
+
+    if os.path.exists(filepath):
+        return send_file(
+            filepath,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename
+        )
     return jsonify({'error': 'File not found or job ID is invalid'}), 404
 
 @app.route('/status/<job_id>')
@@ -718,6 +747,76 @@ def get_status(job_id):
             'stats': job['stats']
         })
     return jsonify({'error': 'Invalid job ID'}), 404
+
+@app.template_filter('datetimeformat')
+def datetimeformat(value, format='%Y-%m-%d %H:%M:%S'):
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value).strftime(format)
+    return value
+
+@app.route('/downloads')
+def list_downloads():
+    files = []
+    for filename in os.listdir(RESULTS_FOLDER):
+        if filename.endswith('.csv'):
+            job_id = filename.replace('_results.csv', '')
+            filepath = os.path.join(RESULTS_FOLDER, filename)
+            files.append({
+                'name': filename,
+                'job_id': job_id,
+                'creation_time': os.path.getctime(filepath)
+            })
+
+    # Sort files by creation time, newest first
+    files.sort(key=lambda x: x['creation_time'], reverse=True)
+
+    return render_template('download_jobs.html', files=files)
+
+@app.route('/preview/<job_id>')
+def preview_job(job_id):
+    filename = f"{job_id}_results.csv"
+    filepath = os.path.join(RESULTS_FOLDER, filename)
+
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            rows = list(reader)
+
+        return jsonify({
+            'headers': headers,
+            'rows': rows
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/view/<job_id>')
+def view_job(job_id):
+    filename = f"{job_id}_results.csv"
+    filepath = os.path.join(RESULTS_FOLDER, filename)
+
+    if not os.path.exists(filepath):
+        return "File not found", 404
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        rows = list(reader)
+
+    return render_template('view_job.html', job_id=job_id, filename=filename, headers=headers, rows=rows)
+
+@app.route('/download/<job_id>')
+def download_job(job_id):
+    filename = f"{job_id}_results.csv"
+    filepath = os.path.join(RESULTS_FOLDER, filename)
+
+    if not os.path.exists(filepath):
+        return "File not found", 404
+
+    return send_file(filepath, as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':
     app.run(debug=True, threaded=True, port=5001)

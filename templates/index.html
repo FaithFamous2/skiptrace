@@ -229,6 +229,8 @@
         const downloadBtn = document.getElementById('downloadBtn');
         const statusMessages = document.getElementById('statusMessages');
         const exportBtn = document.getElementById('exportBtn');
+        const uploadBtn = document.querySelector('#uploadForm button[type="submit"]');
+        const csvFileInput = document.getElementById('csvFile');
 
         function resetUI() {
             progressContainer.style.display = 'none';
@@ -254,12 +256,42 @@
             document.getElementById('costEstimate').textContent = totalCredits;
         }
 
+        function closeEventSource() {
+            try {
+                if (eventSource) {
+                    eventSource.close();
+                }
+            } catch (e) {
+                console.warn('Failed to close existing EventSource', e);
+            } finally {
+                eventSource = null;
+            }
+        }
+
         function listenToJobStream(currentJobId) {
             jobId = currentJobId;
+
+            // ensure we don't open duplicate EventSource
+            if (eventSource) {
+                closeEventSource();
+            }
+
             eventSource = new EventSource(`/stream/${jobId}`);
 
             eventSource.onmessage = function(event) {
-                const data = JSON.parse(event.data);
+                // safe-guard: ignore empty or malformed messages
+                if (!event || !event.data) return;
+
+                let data;
+                try {
+                    data = JSON.parse(event.data);
+                } catch (err) {
+                    console.warn('Failed to parse SSE data', err);
+                    return;
+                }
+
+                // ignore server heartbeats
+                if (data.type === 'heartbeat') return;
 
                 if (data.type === 'progress') {
                     const progress = (data.current / data.total) * 100;
@@ -277,6 +309,9 @@
                     statusMessages.appendChild(messageDiv);
                     statusMessages.scrollTop = statusMessages.scrollHeight;
                 } else if (data.type === 'details') {
+                    // ensure table visible
+                    resultsTable.style.display = 'block';
+
                     const newRow = realTimeResultsBody.insertRow();
                     newRow.innerHTML = `
                         <td>${data.data.first_name || ''}</td>
@@ -287,24 +322,29 @@
                         <td><a href="${data.data.url}" target="_blank" class="url-link">View Profile</a></td>
                     `;
                 } else if (data.type === 'complete' || data.type === 'cancelled') {
-                    eventSource.close();
+                    // job finished
+                    closeEventSource();
                     progressText.textContent = data.message;
                     cancelBtn.style.display = 'none';
                     successElement.innerHTML = `<strong>${data.message}</strong>`;
                     successElement.style.display = 'block';
+                    uploadBtn.disabled = false;
+                    csvFileInput.value = ''; // reset file input
                 } else if (data.type === 'error') {
-                    eventSource.close();
+                    closeEventSource();
                     errorElement.textContent = data.message;
                     errorElement.style.display = 'block';
                     cancelBtn.style.display = 'none';
+                    uploadBtn.disabled = false;
                 }
             };
 
-            eventSource.onerror = function() {
-                errorElement.textContent = 'An error occurred with the connection.';
-                errorElement.style.display = 'block';
-                if (eventSource) eventSource.close();
-                cancelBtn.style.display = 'none';
+            // softer error handling: let EventSource attempt automatic reconnects
+            eventSource.onerror = function(err) {
+                console.warn('SSE connection error (will attempt to reconnect):', err);
+                // optional UI hint (non-blocking)
+                // errorElement.textContent = 'Connection interrupted — retrying...';
+                // errorElement.style.display = 'block';
             };
         }
 
@@ -334,8 +374,10 @@
                 if (status.active && !status.cancelled) {
                     cancelBtn.style.display = 'block';
                     listenToJobStream(jobIdToCheck);
+                    uploadBtn.disabled = true;
                 } else {
                     cancelBtn.style.display = 'none';
+                    uploadBtn.disabled = false;
                     if (status.cancelled) {
                         progressText.textContent = 'Processing was cancelled.';
                     } else {
@@ -353,12 +395,19 @@
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
+            if (!csvFileInput.files || csvFileInput.files.length === 0) {
+                errorElement.textContent = 'Please select a CSV file.';
+                errorElement.style.display = 'block';
+                return;
+            }
+
             const formData = new FormData();
-            formData.append('file', document.getElementById('csvFile').files[0]);
+            formData.append('file', csvFileInput.files[0]);
 
             resetUI();
             progressContainer.style.display = 'block';
             cancelBtn.style.display = 'block';
+            uploadBtn.disabled = true;
 
             try {
                 const response = await fetch('/upload', {
@@ -367,7 +416,7 @@
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json();
+                    const errorData = await response.json().catch(()=>({error:'Invalid response from server'}));
                     throw new Error(errorData.error || 'Failed to start processing');
                 }
 
@@ -386,6 +435,7 @@
                 errorElement.textContent = 'Error: ' + error.message;
                 errorElement.style.display = 'block';
                 progressContainer.style.display = 'none';
+                uploadBtn.disabled = false;
             }
         });
 
@@ -437,5 +487,6 @@
             }
         };
     </script>
+
 </body>
 </html>
