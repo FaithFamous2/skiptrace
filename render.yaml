@@ -6,7 +6,8 @@ services:
     branch: main
     plan: free                  # adjust as needed
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app -w ${WEB_CONCURRENCY:-1} -k gevent --worker-connections 1000 --timeout 120
+    startCommand: gunicorn app:app -w ${WEB_CONCURRENCY:-1} -k gthread --threads 4 --timeout 120
+
     envVars:
       - key: ZENROWS_API_KEY
         sync: false
